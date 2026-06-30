@@ -1,0 +1,8 @@
+{
+  "name": "Remix: WBI Platform working",
+  "description": "Weekly Business Intelligence (WBI) tracker for enterprise performance trends, metrics, and logs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
