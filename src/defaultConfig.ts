@@ -515,7 +515,8 @@ export function getDefaultConfig(): AppConfig {
         sheetName: 'Nurturing',
         charts: [
           { id: 'ch-conn-nurt-1', name: 'Emails Sent', col: 'emails_sent' },
-          { id: 'ch-conn-nurt-2', name: 'SMS Sent', col: 'sms_sent' },
+          { id: 'ch-conn-nurt-2', name: 'Email Nurture Connectivity Rate', col: 'email_nurture_connectivity_rate' },
+          { id: 'ch-conn-nurt-3', name: 'SMS Sent', col: 'sms_sent' },
         ],
       },
 

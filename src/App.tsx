@@ -91,8 +91,10 @@ export default function App() {
   const lastNotesChangeRef = useRef<number>(0);
   const syncNotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Retrieve the stored WBI JWT token for authenticated API calls
-  const getWbiToken = (): string | null => sessionStorage.getItem('wbi_jwt');
+  // Retrieve the stored WBI JWT token for authenticated API calls.
+  // Stored in localStorage (not sessionStorage) so an already-authenticated user
+  // opening a new tab is recognized without a fresh Microsoft login.
+  const getWbiToken = (): string | null => localStorage.getItem('wbi_jwt');
 
   // Helper functions to send mutations to the full-stack server
   const syncConfig = async (newCfg: AppConfig) => {
@@ -287,24 +289,36 @@ export default function App() {
     initSync(false);
     fetchUploadedFiles();
 
-    // Background sync every 20 seconds to pick up changes from other users.
-    // Explicit syncs (syncConfig, syncUserData, syncNotes) handle local mutations immediately.
-    const interval = setInterval(() => {
+    // Refetch when the user actually returns to this tab, instead of polling blindly
+    // every 20 seconds in the background. Own mutations already sync immediately via
+    // syncConfig/syncUserData/syncNotes; this only catches changes made by other users
+    // while this tab was hidden/unfocused.
+    let lastFocusSync = Date.now();
+    const refetchOnReturn = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastFocusSync < 2000) return; // dedupe visibilitychange + focus firing together
+      lastFocusSync = now;
       initSync(true);
-    }, 20000);
+    };
+    document.addEventListener('visibilitychange', refetchOnReturn);
+    window.addEventListener('focus', refetchOnReturn);
 
     return () => {
       active = false;
-      clearInterval(interval);
+      document.removeEventListener('visibilitychange', refetchOnReturn);
+      window.removeEventListener('focus', refetchOnReturn);
     };
   }, [user]);
 
   // Restore session on render, handle Microsoft SSO callback, and Week Auto-Update
   useEffect(() => {
-    const auth = sessionStorage.getItem('wbi_auth');
-    const email = sessionStorage.getItem('wbi_email');
-    const role = sessionStorage.getItem('wbi_role');
-    const existingJwt = sessionStorage.getItem('wbi_jwt');
+    // Read from localStorage (not sessionStorage) so a user who is already logged in
+    // is recognized in a brand-new tab and skips straight to the WBI platform.
+    const auth = localStorage.getItem('wbi_auth');
+    const email = localStorage.getItem('wbi_email');
+    const role = localStorage.getItem('wbi_role');
+    const existingJwt = localStorage.getItem('wbi_jwt');
 
     if (auth === '1' && email) {
       setUser({ email, role: role || 'Member' });
@@ -320,7 +334,7 @@ export default function App() {
           .then((r) => r.ok ? r.json() : null)
           .then((data) => {
             if (data && data.token) {
-              sessionStorage.setItem('wbi_jwt', data.token);
+              localStorage.setItem('wbi_jwt', data.token);
               console.log('[WBI Auth] Refreshed session JWT for existing login.');
             }
           })
@@ -346,7 +360,7 @@ export default function App() {
         if (msEmail) {
           // Store the Microsoft SSO JWT FIRST, then login
           // Pass skipTokenFetch=true so handleLoginSuccess doesn't overwrite it
-          sessionStorage.setItem('wbi_jwt', tokenFromUrl);
+          localStorage.setItem('wbi_jwt', tokenFromUrl);
           handleLoginSuccess(msEmail, true);
         } else {
           console.error('[WBI Auth] Token payload missing email field');
@@ -604,9 +618,11 @@ export default function App() {
   // Session Logging triggers
   const handleLoginSuccess = async (email: string, skipTokenFetch = false) => {
     const role = 'Member'; // PIN unlock based security model
-    sessionStorage.setItem('wbi_auth', '1');
-    sessionStorage.setItem('wbi_email', email);
-    sessionStorage.setItem('wbi_role', role);
+    // localStorage (not sessionStorage) so this login is recognized in any new tab
+    // without requiring another interactive Microsoft sign-in.
+    localStorage.setItem('wbi_auth', '1');
+    localStorage.setItem('wbi_email', email);
+    localStorage.setItem('wbi_role', role);
 
     const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     sessionStorage.setItem('wbi_cur_log_id', logId);
@@ -624,7 +640,7 @@ export default function App() {
         if (tokenRes.ok) {
           const tokenData = await tokenRes.json();
           if (tokenData.token) {
-            sessionStorage.setItem('wbi_jwt', tokenData.token);
+            localStorage.setItem('wbi_jwt', tokenData.token);
           }
         }
       } catch (err) {
@@ -637,10 +653,19 @@ export default function App() {
   };
 
   const handleSignOut = () => {
+    localStorage.removeItem('wbi_auth');
+    localStorage.removeItem('wbi_email');
+    localStorage.removeItem('wbi_role');
+    localStorage.removeItem('wbi_jwt');
     sessionStorage.clear();
     setIsConfigUnlocked(false);
     setUser(null);
     setActiveTab('home');
+
+    // Also sign out of the underlying Microsoft account in this browser, not just this app,
+    // so a new tab doesn't silently pick the Microsoft session back up.
+    const postLogoutRedirectUri = encodeURIComponent(window.location.origin);
+    window.location.href = `https://login.microsoftonline.com/common/oauth2/logout?post_logout_redirect_uri=${postLogoutRedirectUri}`;
   };
 
   // Nav Gating trigger with PINPopupGater
